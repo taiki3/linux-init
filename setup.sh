@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+TARGET_USER="yoshinaka"
+SSH_PUBKEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEtSn9l9+s7fheMDXKZV3QC8333CQyq3h3SDCFNcnWC0 yoshinaka_ED25519"
+
+# root権限でない場合はsudoで再実行
+if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    if command -v sudo >/dev/null 2>&1; then
+        echo "[INFO] Elevating privileges with sudo..."
+        exec sudo bash "$0" "$@"
+    else
+        echo "[ERROR] This script must be run as root (and sudo is not installed)." >&2
+        exit 1
+    fi
+fi
+
+echo "==> Starting user initialization for '${TARGET_USER}'..."
+
+# 1. sudoパッケージの確認・インストール (最小構成環境向け)
+if ! command -v sudo >/dev/null 2>&1; then
+    echo "==> Installing sudo..."
+    if command -v apt-get >/dev/null 2>&1; then
+        apt-get update -y && apt-get install -y sudo
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y sudo
+    elif command -v yum >/dev/null 2>&1; then
+        yum install -y sudo
+    elif command -v pacman >/dev/null 2>&1; then
+        pacman -Sy --noconfirm sudo
+    elif command -v zypper >/dev/null 2>&1; then
+        zypper --non-interactive install sudo
+    elif command -v apk >/dev/null 2>&1; then
+        apk add --no-cache sudo
+    else
+        echo "[ERROR] Could not find a supported package manager to install sudo." >&2
+        exit 1
+    fi
+fi
+
+# 2. ユーザー作成
+DEFAULT_SHELL="/bin/bash"
+if [[ ! -x "$DEFAULT_SHELL" ]]; then
+    DEFAULT_SHELL="/bin/sh"
+fi
+
+if id "$TARGET_USER" >/dev/null 2>&1; then
+    echo "==> User '${TARGET_USER}' already exists. Updating configuration..."
+    usermod -s "$DEFAULT_SHELL" "$TARGET_USER" || true
+else
+    echo "==> Creating user '${TARGET_USER}'..."
+    useradd -m -s "$DEFAULT_SHELL" "$TARGET_USER"
+    # パスワードログインを無効化しつつアカウントロック(!)によるSSH拒否を回避
+    usermod -p '*' "$TARGET_USER" || true
+fi
+
+# sudo / wheel グループが存在すれば追加
+if getent group sudo >/dev/null 2>&1; then
+    usermod -aG sudo "$TARGET_USER"
+fi
+if getent group wheel >/dev/null 2>&1; then
+    usermod -aG wheel "$TARGET_USER"
+fi
+
+# 3. パスワードなしsudo設定 (/etc/sudoers.d/)
+echo "==> Configuring passwordless sudo..."
+mkdir -p /etc/sudoers.d
+SUDOERS_FILE="/etc/sudoers.d/90-${TARGET_USER}"
+echo "${TARGET_USER} ALL=(ALL) NOPASSWD: ALL" > "$SUDOERS_FILE"
+chown root:root "$SUDOERS_FILE"
+chmod 0440 "$SUDOERS_FILE"
+
+if command -v visudo >/dev/null 2>&1; then
+    if ! visudo -cf "$SUDOERS_FILE" >/dev/null; then
+        rm -f "$SUDOERS_FILE"
+        echo "[ERROR] Failed to validate sudoers file." >&2
+        exit 1
+    fi
+fi
+
+# 4. SSH公開鍵の設定
+echo "==> Configuring SSH authorized_keys..."
+USER_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
+if [[ -z "$USER_HOME" ]]; then
+    USER_HOME="/home/${TARGET_USER}"
+fi
+
+SSH_DIR="${USER_HOME}/.ssh"
+AUTH_KEYS="${SSH_DIR}/authorized_keys"
+
+mkdir -p "$SSH_DIR"
+touch "$AUTH_KEYS"
+
+# 公開鍵の本体部分(2フィールド目)で重複チェックして追加
+PUBKEY_BODY="$(echo "$SSH_PUBKEY" | awk '{print $2}')"
+if ! grep -qF "$PUBKEY_BODY" "$AUTH_KEYS" 2>/dev/null; then
+    echo "$SSH_PUBKEY" >> "$AUTH_KEYS"
+    echo "    Added SSH public key."
+else
+    echo "    SSH public key already registered."
+fi
+
+chmod 700 "$SSH_DIR"
+chmod 600 "$AUTH_KEYS"
+chown -R "${TARGET_USER}:${TARGET_USER}" "$SSH_DIR"
+
+# SELinux環境(RHEL系など)の場合にコンテキストを修復
+if command -v restorecon >/dev/null 2>&1; then
+    restorecon -Rv "$SSH_DIR" >/dev/null 2>&1 || true
+fi
+
+echo "==> Done! Setup summary:"
+echo "    User      : ${TARGET_USER}"
+echo "    Home      : ${USER_HOME}"
+echo "    Sudoers   : ${SUDOERS_FILE} (NOPASSWD)"
+echo "    Auth Keys : ${AUTH_KEYS}"
