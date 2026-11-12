@@ -13,7 +13,13 @@
 対象のLinux環境にSSH接続後、リポジトリをクローンして実行します（`root` または `sudo` 可能なユーザーで実行してください）。
 
 ```bash
-git clone <REPO_URL>
+git clone https://github.com/taiki3/linux-init.git
 cd linux-init
-bash setup.sh
+./setup.sh
+```
+
+または `curl` で直接実行することも可能です。
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/taiki3/linux-init/main/setup.sh | sudo bash
 ```
