@@ -7,6 +7,7 @@
 - ユーザー `yoshinaka` の作成（ホームディレクトリ・`/bin/bash`・`sudo`/`wheel` グループ追加）
 - パスワードなし `sudo` の有効化（`/etc/sudoers.d/90-yoshinaka`）
 - SSH公開鍵（`id_ed25519.pub`）の `~/.ssh/authorized_keys` への登録とパーミッション・SELinuxコンテキスト設定
+- `yoshinaka` ユーザー環境への **Herdr** (`https://herdr.dev/install.sh`) と **Claude Code** (`https://claude.ai/install.sh`) の自動インストール（`~/.local/bin` の `PATH` 設定含む）
 
 ## 使い方
 

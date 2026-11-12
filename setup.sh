@@ -17,23 +17,28 @@ fi
 
 echo "==> Starting user initialization for '${TARGET_USER}'..."
 
-# 1. sudoパッケージの確認・インストール (最小構成環境向け)
-if ! command -v sudo >/dev/null 2>&1; then
-    echo "==> Installing sudo..."
+# 1. 必須パッケージ (sudo, curl, ca-certificates, tar) の確認・インストール
+MISSING_PKGS=()
+command -v sudo >/dev/null 2>&1 || MISSING_PKGS+=(sudo)
+command -v curl >/dev/null 2>&1 || MISSING_PKGS+=(curl ca-certificates)
+command -v tar  >/dev/null 2>&1 || MISSING_PKGS+=(tar)
+
+if [[ ${#MISSING_PKGS[@]} -gt 0 ]]; then
+    echo "==> Installing required packages: ${MISSING_PKGS[*]}..."
     if command -v apt-get >/dev/null 2>&1; then
-        apt-get update -y && apt-get install -y sudo
+        apt-get update -y && apt-get install -y "${MISSING_PKGS[@]}"
     elif command -v dnf >/dev/null 2>&1; then
-        dnf install -y sudo
+        dnf install -y "${MISSING_PKGS[@]}"
     elif command -v yum >/dev/null 2>&1; then
-        yum install -y sudo
+        yum install -y "${MISSING_PKGS[@]}"
     elif command -v pacman >/dev/null 2>&1; then
-        pacman -Sy --noconfirm sudo
+        pacman -Sy --noconfirm "${MISSING_PKGS[@]}"
     elif command -v zypper >/dev/null 2>&1; then
-        zypper --non-interactive install sudo
+        zypper --non-interactive install "${MISSING_PKGS[@]}"
     elif command -v apk >/dev/null 2>&1; then
-        apk add --no-cache sudo
+        apk add --no-cache "${MISSING_PKGS[@]}"
     else
-        echo "[ERROR] Could not find a supported package manager to install sudo." >&2
+        echo "[ERROR] Could not find a supported package manager to install: ${MISSING_PKGS[*]}" >&2
         exit 1
     fi
 fi
@@ -109,8 +114,31 @@ if command -v restorecon >/dev/null 2>&1; then
     restorecon -Rv "$SSH_DIR" >/dev/null 2>&1 || true
 fi
 
+# 5. ~/.local/bin の PATH 設定
+echo "==> Ensuring ~/.local/bin is in PATH..."
+mkdir -p "${USER_HOME}/.local/bin"
+chown -R "${TARGET_USER}:${TARGET_USER}" "${USER_HOME}/.local"
+
+for rc_file in "${USER_HOME}/.bashrc" "${USER_HOME}/.profile"; do
+    touch "$rc_file"
+    if ! grep -qF '.local/bin' "$rc_file" 2>/dev/null; then
+        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$rc_file"
+    fi
+    chown "${TARGET_USER}:${TARGET_USER}" "$rc_file"
+done
+
+# 6. Herdr のインストール
+echo "==> Installing Herdr for '${TARGET_USER}'..."
+su - "$TARGET_USER" -c 'export PATH="$HOME/.local/bin:$PATH"; curl -fsSL https://herdr.dev/install.sh | sh'
+
+# 7. Claude Code のインストール
+echo "==> Installing Claude Code for '${TARGET_USER}'..."
+su - "$TARGET_USER" -c 'export PATH="$HOME/.local/bin:$PATH"; curl -fsSL https://claude.ai/install.sh | bash'
+
 echo "==> Done! Setup summary:"
-echo "    User      : ${TARGET_USER}"
-echo "    Home      : ${USER_HOME}"
-echo "    Sudoers   : ${SUDOERS_FILE} (NOPASSWD)"
-echo "    Auth Keys : ${AUTH_KEYS}"
+echo "    User        : ${TARGET_USER}"
+echo "    Home        : ${USER_HOME}"
+echo "    Sudoers     : ${SUDOERS_FILE} (NOPASSWD)"
+echo "    Auth Keys   : ${AUTH_KEYS}"
+echo "    Herdr       : $(su - "$TARGET_USER" -c 'export PATH="$HOME/.local/bin:$PATH"; command -v herdr || echo "installed in ~/.local/bin"')"
+echo "    Claude Code : $(su - "$TARGET_USER" -c 'export PATH="$HOME/.local/bin:$PATH"; command -v claude || echo "installed in ~/.local/bin"')"
