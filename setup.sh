@@ -135,7 +135,12 @@ su - "$TARGET_USER" -c 'export PATH="$HOME/.local/bin:$PATH"; curl -fsSL https:/
 echo "==> Installing Claude Code for '${TARGET_USER}'..."
 su - "$TARGET_USER" -c 'export PATH="$HOME/.local/bin:$PATH"; curl -fsSL https://claude.ai/install.sh | bash'
 
-# 8. OOM・ハング防止設定 (ユニファイドメモリ / LLMクラスタ環境向け)
+# 8. ヘッドレス化 (GUI停止によるユニファイドメモリ解放)
+echo "==> Disabling GUI (gdm3) to free unified memory..."
+systemctl set-default multi-user.target >/dev/null 2>&1 || true
+systemctl stop gdm3 gdm gnome-remote-desktop >/dev/null 2>&1 || true
+
+# 9. OOM・ハング防止設定 & Swap退避チューニング (ユニファイドメモリ / LLMクラスタ環境向け)
 echo "==> Configuring OOM & hang protection (earlyoom, sysctl, sshd OOM guard)..."
 if command -v apt-get >/dev/null 2>&1; then
     apt-get install -y earlyoom || true
@@ -153,7 +158,7 @@ fi
 
 cat > /etc/sysctl.d/99-hang-protection.conf <<'EOF'
 vm.admin_reserve_kbytes = 524288
-vm.swappiness = 1
+vm.swappiness = 100
 kernel.panic = 10
 kernel.panic_on_oops = 1
 kernel.softlockup_panic = 1
@@ -168,6 +173,14 @@ cat > /etc/systemd/system/ssh.service.d/oom-protect.conf <<'EOF'
 OOMScoreAdjust=-1000
 EOF
 systemctl daemon-reload >/dev/null 2>&1 || true
+
+# 10. ページキャッシュ解放 & バックグラウンド常駐メモリのSwap退避
+echo "==> Reclaiming page cache and moving cold system memory to swap..."
+sync
+echo 3 > /proc/sys/vm/drop_caches || true
+if [[ -w /sys/fs/cgroup/system.slice/memory.reclaim ]]; then
+    echo "4G" > /sys/fs/cgroup/system.slice/memory.reclaim 2>/dev/null || true
+fi
 
 echo "==> Done! Setup summary:"
 echo "    User        : ${TARGET_USER}"
