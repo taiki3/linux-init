@@ -8,6 +8,7 @@
 - パスワードなし `sudo` の有効化（`/etc/sudoers.d/90-yoshinaka`）
 - SSH公開鍵（`id_ed25519.pub`）の `~/.ssh/authorized_keys` への登録とパーミッション・SELinuxコンテキスト設定
 - `yoshinaka` ユーザー環境への **Herdr** (`https://herdr.dev/install.sh`) と **Claude Code** (`https://claude.ai/install.sh`) の自動インストール（`~/.local/bin` の `PATH` 設定含む）
+- **OOM・ハング防止設定**: `earlyoom` の導入・設定（空きメモリ2%未満でLLMプロセスを優先停止）、`sshd` の OOM 保護（`OOMScoreAdjust=-1000`）、カーネルロックアップ時の自動再起動設定（`sysctl`）
 
 ## 使い方
 

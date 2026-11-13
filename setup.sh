@@ -135,6 +135,40 @@ su - "$TARGET_USER" -c 'export PATH="$HOME/.local/bin:$PATH"; curl -fsSL https:/
 echo "==> Installing Claude Code for '${TARGET_USER}'..."
 su - "$TARGET_USER" -c 'export PATH="$HOME/.local/bin:$PATH"; curl -fsSL https://claude.ai/install.sh | bash'
 
+# 8. OOM・ハング防止設定 (ユニファイドメモリ / LLMクラスタ環境向け)
+echo "==> Configuring OOM & hang protection (earlyoom, sysctl, sshd OOM guard)..."
+if command -v apt-get >/dev/null 2>&1; then
+    apt-get install -y earlyoom || true
+elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y earlyoom || true
+fi
+
+if command -v earlyoom >/dev/null 2>&1; then
+    cat > /etc/default/earlyoom <<'EOF'
+EARLYOOM_ARGS="-m 2,1 -s 100,100 -r 60 --avoid '(^|/)(init|systemd|sshd|herdr|bash|tmux|dockerd|containerd)$' --prefer '(^|/)(tf-dsv41|tensorfold|vllm|python|python3|zig)'"
+EOF
+    systemctl enable --now earlyoom >/dev/null 2>&1 || true
+    systemctl restart earlyoom >/dev/null 2>&1 || true
+fi
+
+cat > /etc/sysctl.d/99-hang-protection.conf <<'EOF'
+vm.admin_reserve_kbytes = 524288
+vm.swappiness = 1
+kernel.panic = 10
+kernel.panic_on_oops = 1
+kernel.softlockup_panic = 1
+kernel.hung_task_panic = 1
+kernel.hung_task_timeout_secs = 60
+EOF
+sysctl --system >/dev/null 2>&1 || true
+
+mkdir -p /etc/systemd/system/ssh.service.d
+cat > /etc/systemd/system/ssh.service.d/oom-protect.conf <<'EOF'
+[Service]
+OOMScoreAdjust=-1000
+EOF
+systemctl daemon-reload >/dev/null 2>&1 || true
+
 echo "==> Done! Setup summary:"
 echo "    User        : ${TARGET_USER}"
 echo "    Home        : ${USER_HOME}"
