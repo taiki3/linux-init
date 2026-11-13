@@ -174,13 +174,37 @@ OOMScoreAdjust=-1000
 EOF
 systemctl daemon-reload >/dev/null 2>&1 || true
 
-# 10. ページキャッシュ解放 & バックグラウンド常駐メモリのSwap退避
+# 10. ページキャッシュ解放 & バックグラウンド常駐メモリのSwap退避 (即時 + 定期タイマー)
 echo "==> Reclaiming page cache and moving cold system memory to swap..."
 sync
 echo 3 > /proc/sys/vm/drop_caches || true
 if [[ -w /sys/fs/cgroup/system.slice/memory.reclaim ]]; then
     echo "4G" > /sys/fs/cgroup/system.slice/memory.reclaim 2>/dev/null || true
 fi
+
+cat > /etc/systemd/system/gb10-memory-reclaim.service <<'EOF'
+[Unit]
+Description=Reclaim cold pages from system.slice to swap for GPU unified memory
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'if [ -w /sys/fs/cgroup/system.slice/memory.reclaim ]; then echo 4G > /sys/fs/cgroup/system.slice/memory.reclaim 2>/dev/null || true; fi'
+EOF
+
+cat > /etc/systemd/system/gb10-memory-reclaim.timer <<'EOF'
+[Unit]
+Description=Periodic system.slice swap reclaim timer
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+
+[Install]
+WantedBy=timers.target
+EOF
+
+systemctl daemon-reload >/dev/null 2>&1 || true
+systemctl enable --now gb10-memory-reclaim.timer >/dev/null 2>&1 || true
 
 echo "==> Done! Setup summary:"
 echo "    User        : ${TARGET_USER}"
